@@ -158,6 +158,34 @@
     </div>
     <button class="export-btn" onclick="exportData()">Export to CSV</button>
 
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+    import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-analytics.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyByW5mvlzUYirCE6BKChE1TbPUqsHAJCoI",
+        authDomain: "tracker-80c47.firebaseapp.com",
+        projectId: "tracker-80c47",
+        storageBucket: "tracker-80c47.appspot.com",
+        messagingSenderId: "857150982118",
+        appId: "1:857150982118:web:ad01125d55125dc54d3827",
+        measurementId: "G-QWR18QPPX2"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const analytics = getAnalytics(app);
+    const database = getDatabase(app);
+
+    // Initialize app and load state
+    document.addEventListener("DOMContentLoaded", () => {
+        init();
+        loadState();
+    });
+</script>
+
+
     <script>
         const machines = ["B2", "B3", "B4", "FS02", "FS05", "FS04"];
         const reasons = [
@@ -600,62 +628,57 @@ function sendWhatsAppStopMessage(machineName, stopReason, startTime, totalElapse
 
 
 	function saveState() {
-    const state = {
-        stopTimes,
-        csvData,
-        buttonStates: {}
-    };
+    const dbRef = ref(database, 'machineStopTimes');
 
+    const data = {};
     machines.forEach(machine => {
-        state.buttonStates[machine] = {};
-        reasons.forEach(reason => {
-            const startBtn = document.getElementById(`${machine}-${reason}-start-btn`);
-            const stopBtn = document.getElementById(`${machine}-${reason}-stop-btn`);
-            state.buttonStates[machine][reason] = {
-                startBtnDisabled: startBtn ? startBtn.disabled : true,
-                stopBtnDisabled: stopBtn ? stopBtn.disabled : true
-            };
-        });
+        data[machine] = stopTimes[machine];
+        data[machine].machineStart = stopTimes[machine].machineStart;
     });
 
-    console.log("Saving state:", state); // Debugging statement
-    localStorage.setItem('machineTrackerState', JSON.stringify(state));
+    set(dbRef, data)
+        .then(() => {
+            console.log("State saved successfully.");
+        })
+        .catch((error) => {
+            console.error("Error saving state:", error);
+        });
 }
 
 	
        function loadState() {
-    const savedState = localStorage.getItem('machineTrackerState');
-    if (savedState) {
-        const state = JSON.parse(savedState);
-        console.log("Loaded state:", state); // Debugging statement
-        stopTimes = state.stopTimes || stopTimes;
-        csvData = state.csvData || csvData;
-        const buttonStates = state.buttonStates || {};
+    const dbRef = ref(database, 'machineStopTimes');
+    
+    get(dbRef).then((snapshot) => {
+        if (snapshot.exists()) {
+            const data = snapshot.val();
 
-        machines.forEach(machine => {
-            reasons.forEach(reason => {
-                if (stopTimes[machine][reason].start !== null) {
-                    intervals[machine][reason] = setInterval(() => updateDisplay(machine, reason), 1000);
-                }
-                updateDisplay(machine, reason);
+            // Initialize state with data from Firebase
+            Object.keys(data).forEach(machine => {
+                stopTimes[machine] = data[machine];
+                stopTimes[machine].machineStart = data[machine].machineStart;
+                
+                Object.keys(stopTimes[machine]).forEach(reason => {
+                    const timer = stopTimes[machine][reason];
+                    if (timer.start) {
+                        timer.start = new Date(timer.start).getTime();
+                    }
+                });
 
-                const startBtn = document.getElementById(`${machine}-${reason}-start-btn`);
-                const stopBtn = document.getElementById(`${machine}-${reason}-stop-btn`);
-                if (startBtn) {
-                    startBtn.disabled = buttonStates[machine]?.[reason]?.startBtnDisabled ?? false;
-                    startBtn.classList.toggle('disabled', startBtn.disabled);
-                }
-                if (stopBtn) {
-                    stopBtn.disabled = buttonStates[machine]?.[reason]?.stopBtnDisabled ?? true;
-                    stopBtn.classList.toggle('disabled', stopBtn.disabled);
-                }
+                // Update UI and controls based on retrieved data
+                updateMachineDisplay(machine);
+                Object.keys(stopTimes[machine]).forEach(reason => {
+                    if (stopTimes[machine][reason].start !== null) {
+                        startStop(machine, reason);
+                    }
+                });
             });
-            if (stopTimes[machine]?.machineStart !== null) {
-                machineIntervals[machine] = setInterval(() => updateMachineDisplay(machine), 1000);
-            }
-            updateMachineDisplay(machine);
-        });
-    }
+        } else {
+            console.log("No data available.");
+        }
+    }).catch((error) => {
+        console.error("Error loading state:", error);
+    });
 }
 
 	function resetAll() {
@@ -700,6 +723,44 @@ function sendWhatsAppStopMessage(machineName, stopReason, startTime, totalElapse
     // Optionally, save the state
     saveState();
 }
+
+
+	function listenForUpdates() {
+    const dbRef = ref(database, 'machineStopTimes');
+
+    onValue(dbRef, (snapshot) => {
+        if (snapshot.exists()) {
+            const data = snapshot.val();
+            
+            // Update app state with real-time data from Firebase
+            Object.keys(data).forEach(machine => {
+                stopTimes[machine] = data[machine];
+                stopTimes[machine].machineStart = data[machine].machineStart;
+                
+                Object.keys(stopTimes[machine]).forEach(reason => {
+                    const timer = stopTimes[machine][reason];
+                    if (timer.start) {
+                        timer.start = new Date(timer.start).getTime();
+                    }
+                });
+
+                // Update UI based on real-time data
+                updateMachineDisplay(machine);
+                Object.keys(stopTimes[machine]).forEach(reason => {
+                    if (stopTimes[machine][reason].start !== null) {
+                        startStop(machine, reason);
+                    }
+                });
+            });
+        }
+    });
+}
+
+// Call listenForUpdates when initializing
+document.addEventListener("DOMContentLoaded", () => {
+    listenForUpdates();
+});
+
 
 
         window.addEventListener('beforeunload', saveState);
